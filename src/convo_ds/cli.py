@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from convo_ds.config import load_config
+from convo_ds.hf_upload import upload_to_hf
 from convo_ds.mimi import assemble_training_shards as run_assemble_training_shards
 from convo_ds.mimi import tokenize_mimi as run_tokenize_mimi
 from convo_ds.scripts import generate_scripts as run_generate_scripts
@@ -120,12 +121,14 @@ def validate(
 @app.command()
 def upload_hf(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    data_dir: Path = typer.Option(Path("data"), "--data-dir"),
     subset: str = typer.Option("all", "--subset"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Upload dataset artifacts to Hugging Face."""
-    _load(config)
-    typer.echo(f"upload-hf subset={subset} dry_run={dry_run}; not implemented yet.")
+    cfg = _load(config)
+    result = upload_to_hf(cfg, data_dir, subset=subset, dry_run=dry_run)
+    typer.echo(result)
 
 
 if __name__ == "__main__":
