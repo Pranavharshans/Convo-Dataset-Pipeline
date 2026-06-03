@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from convo_ds.config import load_config
+from convo_ds.scripts import generate_scripts as run_generate_scripts
 
 app = typer.Typer(help="Synthetic conversation dataset pipeline.")
 
@@ -24,11 +25,14 @@ def show_config(config: Optional[Path] = typer.Option(None, "--config", "-c")) -
 @app.command()
 def generate_scripts(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    output: Path = typer.Option(Path("data/scripts/dialogues.jsonl"), "--output", "-o"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Generate text dialogue scripts from an OpenAI-compatible API."""
-    _load(config)
-    typer.echo("generate-scripts is not implemented yet." if not dry_run else "generate-scripts dry run ok.")
+    cfg = _load(config)
+    manifest = run_generate_scripts(cfg, output, limit=limit, dry_run=dry_run)
+    typer.echo(f"generated scripts manifest: {manifest}")
 
 
 @app.command()
