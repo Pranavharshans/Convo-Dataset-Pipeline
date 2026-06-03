@@ -1,0 +1,40 @@
+output_dir = "data"
+
+[script_generation]
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "LLM_API_KEY"
+model = "replace-with-nim-model"
+requests_per_minute = 35
+conversations_per_request = 5
+max_retries = 3
+topics = [
+  "making evening plans",
+  "fixing a work proposal",
+  "switching careers",
+  "a strange conference story",
+  "planning a weekend trip",
+]
+
+[dia]
+model_id = "nari-labs/Dia-1.6B"
+sample_rate = 44100
+output_sample_rate = 24000
+precision = "bfloat16"
+compile = true
+duration_regen_limit = 2
+
+[overlap]
+target_hours = 200.0
+backchannel_ratio = 0.70
+interruption_ratio = 0.25
+simultaneous_start_ratio = 0.05
+overlap_attenuation = 0.82
+
+[mimi]
+model_id = "kyutai/mimi"
+training_codebooks = 8
+token_count = 2048
+
+[huggingface]
+repo_env = "HF_DATASET_REPO"
+token_env = "HF_TOKEN"
