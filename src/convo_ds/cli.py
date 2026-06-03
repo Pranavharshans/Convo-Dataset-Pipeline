@@ -6,6 +6,8 @@ from typing import Optional
 import typer
 
 from convo_ds.config import load_config
+from convo_ds.mimi import assemble_training_shards as run_assemble_training_shards
+from convo_ds.mimi import tokenize_mimi as run_tokenize_mimi
 from convo_ds.scripts import generate_scripts as run_generate_scripts
 from convo_ds.stage3 import synthesize_stage3 as run_synthesize_stage3
 from convo_ds.stage4 import inject_overlaps as run_inject_overlaps
@@ -67,17 +69,29 @@ def inject_overlap(
 
 
 @app.command()
-def tokenize_mimi(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+def tokenize_mimi(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    stage: Path = typer.Option(Path("data/stage3"), "--stage"),
+    output: Path = typer.Option(Path("data/tokens/stage3_mimi.jsonl"), "--output", "-o"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    mock: bool = typer.Option(False, "--mock"),
+) -> None:
     """Tokenize audio with Mimi."""
-    _load(config)
-    typer.echo("tokenize-mimi is not implemented yet.")
+    cfg = _load(config)
+    result = run_tokenize_mimi(cfg, stage, output, limit=limit, mock=mock)
+    typer.echo(f"tokenize-mimi result: {result}")
 
 
 @app.command()
-def assemble_shards(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+def assemble_shards(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    tokens: Path = typer.Option(Path("data/tokens/stage3_mimi.jsonl"), "--tokens"),
+    output: Path = typer.Option(Path("data/shards/stage3_train.jsonl"), "--output", "-o"),
+) -> None:
     """Assemble model-ready JSONL training shards."""
     _load(config)
-    typer.echo("assemble-shards is not implemented yet.")
+    result = run_assemble_training_shards(tokens, output)
+    typer.echo(f"assemble-shards result: {result}")
 
 
 @app.command()
