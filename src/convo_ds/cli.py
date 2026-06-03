@@ -8,6 +8,7 @@ import typer
 from convo_ds.config import load_config
 from convo_ds.scripts import generate_scripts as run_generate_scripts
 from convo_ds.stage3 import synthesize_stage3 as run_synthesize_stage3
+from convo_ds.validation import validate_scripts, validate_shards, validate_stage_dir
 
 app = typer.Typer(help="Synthetic conversation dataset pipeline.")
 
@@ -72,10 +73,26 @@ def assemble_shards(config: Optional[Path] = typer.Option(None, "--config", "-c"
 
 
 @app.command()
-def validate(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+def validate(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    subset: str = typer.Option("stage3", "--subset"),
+    path: Path = typer.Option(Path("data/stage3"), "--path"),
+) -> None:
     """Validate generated dataset artifacts."""
-    _load(config)
-    typer.echo("validate is not implemented yet.")
+    cfg = _load(config)
+    if subset == "scripts":
+        report = validate_scripts(cfg, path)
+    elif subset == "stage3":
+        report = validate_stage_dir(cfg, path)
+    elif subset == "stage4":
+        report = validate_stage_dir(cfg, path, require_overlaps=True)
+    elif subset == "shards":
+        report = validate_shards(path)
+    else:
+        raise typer.BadParameter("subset must be scripts, stage3, stage4, or shards")
+    typer.echo(report.as_dict())
+    if not report.ok:
+        raise typer.Exit(code=1)
 
 
 @app.command()
