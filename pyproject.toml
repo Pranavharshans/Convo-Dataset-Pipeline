@@ -1,0 +1,39 @@
+[project]
+name = "convo-dataset-pipeline"
+version = "0.1.0"
+description = "Pipeline for synthetic full-duplex speech LLM dialogue datasets."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27.0",
+  "huggingface-hub>=0.23.0",
+  "numpy>=1.24.0",
+  "pydantic>=2.7.0",
+  "soundfile>=0.12.1",
+  "tomli>=2.0.1; python_version<'3.11'",
+  "typer>=0.12.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+]
+gpu = [
+  "torch>=2.0.0",
+  "torchaudio>=2.0.0",
+  "transformers>=4.45.0",
+]
+
+[project.scripts]
+convo-ds = "convo_ds.cli:app"
+
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
