@@ -7,6 +7,7 @@ import typer
 
 from convo_ds.config import load_config
 from convo_ds.scripts import generate_scripts as run_generate_scripts
+from convo_ds.stage3 import synthesize_stage3 as run_synthesize_stage3
 
 app = typer.Typer(help="Synthetic conversation dataset pipeline.")
 
@@ -36,10 +37,17 @@ def generate_scripts(
 
 
 @app.command()
-def synth_stage3(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+def synth_stage3(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    scripts: Path = typer.Option(Path("data/scripts/dialogues.jsonl"), "--scripts"),
+    output: Path = typer.Option(Path("data/stage3"), "--output", "-o"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    mock: bool = typer.Option(False, "--mock"),
+) -> None:
     """Synthesize clean Stage 3 dialogue audio."""
-    _load(config)
-    typer.echo("synth-stage3 is not implemented yet.")
+    cfg = _load(config)
+    result = run_synthesize_stage3(cfg, scripts, output, limit=limit, mock=mock)
+    typer.echo(f"synth-stage3 result: {result}")
 
 
 @app.command()

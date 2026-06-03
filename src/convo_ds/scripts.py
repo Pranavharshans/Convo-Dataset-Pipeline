@@ -217,13 +217,14 @@ def _bucket_count(output_path: Path, bucket_name: str) -> int:
 def _dry_run_response(bucket: ConversationBucket, count: int) -> str:
     blocks = []
     turn_count = bucket.turn_min
+    target_words_per_turn = max(4, int(bucket.duration_avg_sec * 2.4 / turn_count))
     for _ in range(count):
         lines = []
         for index in range(turn_count):
             tag = "[S1]" if index % 2 == 0 else "[S2]"
-            lines.append(
-                f"{tag} This is a {bucket.name} synthetic dialogue turn number {index + 1}, "
-                "with enough natural words to pass the planning duration estimate."
-            )
+            words = ["This", "is", "a", bucket.name, "dialogue", "turn", str(index + 1)]
+            while len(words) < target_words_per_turn:
+                words.extend(["with", "natural", "spoken", "detail"])
+            lines.append(f"{tag} {' '.join(words[:target_words_per_turn])}.")
         blocks.append("\n".join(lines))
     return "\n---\n".join(blocks)
