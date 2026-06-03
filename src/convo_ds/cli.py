@@ -8,6 +8,7 @@ import typer
 from convo_ds.config import load_config
 from convo_ds.scripts import generate_scripts as run_generate_scripts
 from convo_ds.stage3 import synthesize_stage3 as run_synthesize_stage3
+from convo_ds.stage4 import inject_overlaps as run_inject_overlaps
 from convo_ds.validation import validate_scripts, validate_shards, validate_stage_dir
 
 app = typer.Typer(help="Synthetic conversation dataset pipeline.")
@@ -52,10 +53,17 @@ def synth_stage3(
 
 
 @app.command()
-def inject_overlap(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+def inject_overlap(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    stage3: Path = typer.Option(Path("data/stage3"), "--stage3"),
+    output: Path = typer.Option(Path("data/stage4"), "--output", "-o"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    seed: int = typer.Option(13, "--seed"),
+) -> None:
     """Create Stage 4 overlapped dialogue from Stage 3."""
-    _load(config)
-    typer.echo("inject-overlap is not implemented yet.")
+    cfg = _load(config)
+    result = run_inject_overlaps(cfg, stage3, output, limit=limit, seed=seed)
+    typer.echo(f"inject-overlap result: {result}")
 
 
 @app.command()
