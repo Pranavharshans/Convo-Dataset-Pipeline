@@ -20,6 +20,8 @@ class ConversationBucket(BaseModel):
     duration_min_sec: float
     duration_max_sec: float
     duration_avg_sec: float
+    words_min: int
+    words_max: int
     description: str
 
 
@@ -81,6 +83,8 @@ def default_buckets() -> list[ConversationBucket]:
             duration_min_sec=12,
             duration_max_sec=20,
             duration_avg_sec=16,
+            words_min=28,
+            words_max=55,
             description="Fast alternation, greetings, quick plans, yes/no exchanges.",
         ),
         ConversationBucket(
@@ -91,6 +95,8 @@ def default_buckets() -> list[ConversationBucket]:
             duration_min_sec=25,
             duration_max_sec=40,
             duration_avg_sec=30,
+            words_min=70,
+            words_max=115,
             description="Natural conversational flow and main workhorse examples.",
         ),
         ConversationBucket(
@@ -101,6 +107,8 @@ def default_buckets() -> list[ConversationBucket]:
             duration_min_sec=40,
             duration_max_sec=55,
             duration_avg_sec=45,
+            words_min=115,
+            words_max=170,
             description="Sustained attention and nuanced topic development.",
         ),
         ConversationBucket(
@@ -111,6 +119,8 @@ def default_buckets() -> list[ConversationBucket]:
             duration_min_sec=55,
             duration_max_sec=90,
             duration_avg_sec=65,
+            words_min=170,
+            words_max=260,
             description="Story arcs, debates, and long-range coherence.",
         ),
     ]

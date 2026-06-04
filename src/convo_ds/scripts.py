@@ -96,6 +96,9 @@ def validate_script_for_bucket(script: DialogueScript, bucket: ConversationBucke
         raise ValueError(f"script category {script.category} does not match bucket {bucket.name}")
     if not bucket.turn_min <= len(script.turns) <= bucket.turn_max:
         raise ValueError(f"{script.conversation_id} has {len(script.turns)} turns, expected {bucket.turn_min}-{bucket.turn_max}")
+    word_count = count_script_words(script)
+    if not bucket.words_min <= word_count <= bucket.words_max:
+        raise ValueError(f"{script.conversation_id} has {word_count} words, expected {bucket.words_min}-{bucket.words_max}")
     if script.estimated_duration_sec is not None:
         lower = bucket.duration_min_sec * 0.25
         upper = bucket.duration_max_sec * 1.5
@@ -109,6 +112,10 @@ def estimate_duration_sec(turns: list[ScriptTurn]) -> float:
     return max(1.0, words / 2.6 + nonverbal_bonus)
 
 
+def count_script_words(script: DialogueScript) -> int:
+    return sum(len(re.findall(r"\b[\w']+\b", turn.text)) for turn in script.turns)
+
+
 def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> str:
     topic_list = topics or DEFAULT_TOPICS
     sampled_topics = random.sample(topic_list, k=min(len(topic_list), max(1, count)))
@@ -117,7 +124,10 @@ def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> s
         "Use exactly [S1] and [S2] speaker tags, alternating speakers every turn.\n"
         "Include occasional non-verbal tags such as (laughs), (sighs), (gasps), (whispers), or (coughs), but keep them natural.\n"
         f"Create {count} separate conversations for category '{bucket.name}'.\n"
-        f"Each conversation must have {bucket.turn_min}-{bucket.turn_max} turns and target about {bucket.duration_avg_sec:.0f} seconds.\n"
+        f"Each conversation must have {bucket.turn_min}-{bucket.turn_max} turns.\n"
+        f"Each conversation must contain {bucket.words_min}-{bucket.words_max} spoken words total.\n"
+        f"Target about {bucket.duration_avg_sec:.0f} seconds after TTS; do not make every category similar length.\n"
+        "Short should feel quick. Medium should have more development. Long should sustain a topic. Extended should have a story arc or deeper explanation.\n"
         f"Category purpose: {bucket.description}\n"
         f"Use varied topics like: {', '.join(sampled_topics)}.\n"
         "Separate conversations with a line containing only ---.\n"
@@ -155,6 +165,28 @@ def generate_scripts(config: PipelineConfig, output_path: Path, limit: int | Non
             write_json(manifest_path, manifest)
         if written >= total_target:
             break
+    return manifest
+
+
+def generate_zipvoice_dialog_scripts(
+    config: PipelineConfig,
+    output_dir: Path,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    combined_path = output_dir / "zipvoice_dialog_scripts.jsonl"
+    manifest: dict[str, dict] = {"combined": generate_scripts(config, combined_path, limit=limit, dry_run=dry_run)}
+    scripts_by_bucket: dict[str, list[DialogueScript]] = {bucket.name: [] for bucket in config.buckets}
+    for script in read_jsonl(combined_path, DialogueScript):
+        scripts_by_bucket.setdefault(script.category, []).append(script)
+    for bucket_name, scripts in scripts_by_bucket.items():
+        bucket_path = output_dir / f"{bucket_name}.jsonl"
+        if bucket_path.exists():
+            bucket_path.unlink()
+        append_jsonl(bucket_path, scripts)
+        manifest[bucket_name] = {"completed": len(scripts), "path": bucket_path.as_posix()}
+    write_json(output_dir / "zipvoice_dialog_scripts.manifest.json", manifest)
     return manifest
 
 
@@ -217,7 +249,7 @@ def _bucket_count(output_path: Path, bucket_name: str) -> int:
 def _dry_run_response(bucket: ConversationBucket, count: int) -> str:
     blocks = []
     turn_count = bucket.turn_min
-    target_words_per_turn = max(4, int(bucket.duration_avg_sec * 2.4 / turn_count))
+    target_words_per_turn = max(4, int(((bucket.words_min + bucket.words_max) / 2) / turn_count))
     for _ in range(count):
         lines = []
         for index in range(turn_count):

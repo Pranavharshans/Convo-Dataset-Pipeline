@@ -10,9 +10,11 @@ from convo_ds.hf_upload import upload_to_hf
 from convo_ds.mimi import assemble_training_shards as run_assemble_training_shards
 from convo_ds.mimi import tokenize_mimi as run_tokenize_mimi
 from convo_ds.scripts import generate_scripts as run_generate_scripts
+from convo_ds.scripts import generate_zipvoice_dialog_scripts as run_generate_zipvoice_dialog_scripts
 from convo_ds.stage3 import synthesize_stage3 as run_synthesize_stage3
 from convo_ds.stage4 import inject_overlaps as run_inject_overlaps
 from convo_ds.validation import validate_scripts, validate_shards, validate_stage_dir
+from convo_ds.zipvoice import export_zipvoice_dialog_tsv as run_export_zipvoice_dialog_tsv
 
 app = typer.Typer(help="Synthetic conversation dataset pipeline.")
 
@@ -39,6 +41,31 @@ def generate_scripts(
     cfg = _load(config)
     manifest = run_generate_scripts(cfg, output, limit=limit, dry_run=dry_run)
     typer.echo(f"generated scripts manifest: {manifest}")
+
+
+@app.command()
+def generate_zipvoice_dialog_scripts(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    output_dir: Path = typer.Option(Path("data/scripts/zipvoice_dialog"), "--output-dir", "-o"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Generate bucketed [S1]/[S2] dialogue scripts for ZipVoice-Dialog."""
+    cfg = _load(config)
+    manifest = run_generate_zipvoice_dialog_scripts(cfg, output_dir, limit=limit, dry_run=dry_run)
+    typer.echo(f"zipvoice dialogue scripts manifest: {manifest}")
+
+
+@app.command()
+def export_zipvoice_dialog_tsv(
+    scripts: Path = typer.Option(Path("data/scripts/zipvoice_dialog/zipvoice_dialog_scripts.jsonl"), "--scripts"),
+    voice_prompts: Path = typer.Option(Path("voice_prompts"), "--voice-prompts"),
+    output: Path = typer.Option(Path("data/zipvoice_dialog/test.tsv"), "--output", "-o"),
+    bucket: Optional[str] = typer.Option(None, "--bucket"),
+) -> None:
+    """Export scripts to ZipVoice-Dialog split-prompt TSV format."""
+    result = run_export_zipvoice_dialog_tsv(scripts, voice_prompts, output, bucket=bucket)
+    typer.echo(f"export-zipvoice-dialog-tsv result: {result}")
 
 
 @app.command()

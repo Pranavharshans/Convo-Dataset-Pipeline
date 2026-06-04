@@ -17,6 +17,8 @@ convo-ds --help
 
 Main commands:
 
+- `generate-zipvoice-dialog-scripts`
+- `export-zipvoice-dialog-tsv`
 - `generate-scripts`
 - `synth-stage3`
 - `inject-overlap`
@@ -43,6 +45,75 @@ export HF_DATASET_REPO=org-or-user/dataset-name
 ```
 
 GPU synthesis/tokenization requires optional dependencies and model access.
+
+## ZipVoice Dialogue Scripts
+
+The primary script path is ZipVoice-Dialog-Stereo. Generate bucketed scripts:
+
+```bash
+convo-ds generate-zipvoice-dialog-scripts \
+  --config examples/config.toml \
+  --output-dir data/scripts/zipvoice_dialog \
+  --limit 50000
+```
+
+This writes:
+
+```text
+data/scripts/zipvoice_dialog/
+  zipvoice_dialog_scripts.jsonl
+  short.jsonl
+  medium.jsonl
+  long.jsonl
+  extended.jsonl
+  zipvoice_dialog_scripts.manifest.json
+```
+
+The generator enforces separate bucket constraints:
+
+- short: 4-6 turns, 28-55 words, fast exchanges.
+- medium: 6-8 turns, 70-115 words, natural flow.
+- long: 8-10 turns, 115-170 words, sustained topic.
+- extended: 10-14 turns, 170-260 words, story arc or deeper explanation.
+
+Export ZipVoice split-prompt TSV:
+
+```bash
+convo-ds export-zipvoice-dialog-tsv \
+  --scripts data/scripts/zipvoice_dialog/zipvoice_dialog_scripts.jsonl \
+  --voice-prompts voice_prompts \
+  --output data/zipvoice_dialog/test.tsv
+```
+
+Expected prompt bank format:
+
+```text
+voice_prompts/
+  pair_000/
+    s1.wav
+    s2.wav
+    meta.json
+```
+
+`meta.json`:
+
+```json
+{
+  "s1_prompt_transcription": "Hello, this is speaker one.",
+  "s2_prompt_transcription": "Hi, this is speaker two.",
+  "s1_prompt_wav": "s1.wav",
+  "s2_prompt_wav": "s2.wav"
+}
+```
+
+Run ZipVoice:
+
+```bash
+python3 -m zipvoice.bin.infer_zipvoice_dialog \
+  --model-name zipvoice_dialog_stereo \
+  --test-list data/zipvoice_dialog/test.tsv \
+  --res-dir data/zipvoice_dialog/results
+```
 
 ## Local Smoke Test
 

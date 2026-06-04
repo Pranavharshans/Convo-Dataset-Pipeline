@@ -38,3 +38,51 @@ token_count = 2048
 [huggingface]
 repo_env = "HF_DATASET_REPO"
 token_env = "HF_TOKEN"
+
+[[buckets]]
+name = "short"
+count = 15000
+turn_min = 4
+turn_max = 6
+duration_min_sec = 12
+duration_max_sec = 20
+duration_avg_sec = 16
+words_min = 28
+words_max = 55
+description = "Fast alternation, greetings, quick plans, yes/no exchanges."
+
+[[buckets]]
+name = "medium"
+count = 20000
+turn_min = 6
+turn_max = 8
+duration_min_sec = 25
+duration_max_sec = 40
+duration_avg_sec = 30
+words_min = 70
+words_max = 115
+description = "Natural conversational flow and main workhorse examples."
+
+[[buckets]]
+name = "long"
+count = 10000
+turn_min = 8
+turn_max = 10
+duration_min_sec = 40
+duration_max_sec = 55
+duration_avg_sec = 45
+words_min = 115
+words_max = 170
+description = "Sustained attention and nuanced topic development."
+
+[[buckets]]
+name = "extended"
+count = 5000
+turn_min = 10
+turn_max = 14
+duration_min_sec = 55
+duration_max_sec = 90
+duration_avg_sec = 65
+words_min = 170
+words_max = 260
+description = "Story arcs, debates, and long-range coherence."
