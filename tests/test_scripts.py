@@ -3,7 +3,14 @@ from pathlib import Path
 from convo_ds.config import default_config
 from convo_ds.jsonl import read_jsonl
 from convo_ds.schemas import DialogueScript, Speaker
-from convo_ds.scripts import generate_scripts, generate_zipvoice_dialog_scripts, parse_script_block, sanitize_turn_text, validate_script_for_bucket
+from convo_ds.scripts import (
+    generate_scripts,
+    generate_zipvoice_dialog_scripts,
+    normalize_terminal_punctuation,
+    parse_script_block,
+    sanitize_turn_text,
+    validate_script_for_bucket,
+)
 
 
 def test_parse_script_block_accepts_dia_tags() -> None:
@@ -35,6 +42,17 @@ def test_parse_script_block_sanitizes_zipvoice_text() -> None:
 
 def test_sanitize_turn_text_removes_actions_and_leading_punctuation() -> None:
     assert sanitize_turn_text(": Perfect! I'll book the cabin. (checks list) [laugh]") == "Perfect! I'll book the cabin."
+
+
+def test_sanitize_turn_text_adds_terminal_punctuation() -> None:
+    assert sanitize_turn_text("Will you be free after work") == "Will you be free after work?"
+    assert sanitize_turn_text("Sounds good Will you be free after work") == "Sounds good Will you be free after work."
+    assert sanitize_turn_text("I will reserve a table") == "I will reserve a table."
+
+
+def test_normalize_terminal_punctuation_preserves_existing_marks() -> None:
+    assert normalize_terminal_punctuation("Are you free?") == "Are you free?"
+    assert normalize_terminal_punctuation("Great!") == "Great!"
 
 
 def test_validate_script_for_bucket() -> None:

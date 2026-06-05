@@ -16,6 +16,7 @@ from convo_ds.schemas import DialogueScript, ScriptTurn, Speaker
 SCRIPT_LINE_RE = re.compile(r"^\[(S0|S1|S2)\]\s*(.+)$")
 PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
 BRACKETED_ACTION_RE = re.compile(r"\[(?!S[012]\])[^]]+\]")
+TERMINAL_PUNCTUATION_RE = re.compile(r"[.!?]$")
 
 
 DEFAULT_TOPICS = [
@@ -104,6 +105,8 @@ def validate_script_for_bucket(script: DialogueScript, bucket: ConversationBucke
     for turn in script.turns:
         if PARENTHETICAL_RE.search(turn.text) or BRACKETED_ACTION_RE.search(turn.text):
             raise ValueError(f"{script.conversation_id} contains stage directions")
+        if not TERMINAL_PUNCTUATION_RE.search(turn.text):
+            raise ValueError(f"{script.conversation_id} turn is missing terminal punctuation")
     if script.estimated_duration_sec is not None:
         lower = bucket.duration_min_sec * 0.25
         upper = bucket.duration_max_sec * 1.5
@@ -126,7 +129,19 @@ def sanitize_turn_text(text: str) -> str:
     cleaned = BRACKETED_ACTION_RE.sub("", cleaned)
     cleaned = re.sub(r"^[\s:：\-–—]+", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = normalize_terminal_punctuation(cleaned)
     return cleaned
+
+
+def normalize_terminal_punctuation(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    if TERMINAL_PUNCTUATION_RE.search(stripped):
+        return stripped
+    if stripped.lower().startswith(("who ", "what ", "when ", "where ", "why ", "how ", "do ", "does ", "did ", "can ", "could ", "would ", "will ", "should ", "are ", "is ", "was ", "were ")):
+        return f"{stripped}?"
+    return f"{stripped}."
 
 
 def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> tuple[str, list[str]]:
@@ -140,6 +155,8 @@ def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> t
         "Do not include emotion tags, nonverbal tags, parenthetical stage directions, action tags, markdown, numbering, titles, or explanations.\n"
         "Forbidden examples: (laughs), (sighs), (gasps), (smiles), (checks phone), [laugh], [sigh], [whisper].\n"
         "Use plain speakable dialogue only; every word should be safe to send directly to TTS.\n"
+        "Use normal English punctuation. Every turn must end with a period, question mark, or exclamation mark.\n"
+        "Do not omit punctuation between sentences.\n"
         f"Create {count} separate conversations for category '{bucket.name}'.\n"
         f"Each conversation must have {bucket.turn_min}-{bucket.turn_max} turns.\n"
         f"Each conversation must contain {bucket.words_min}-{bucket.words_max} spoken words total.\n"
