@@ -82,6 +82,14 @@ During generation the terminal logs progress every `progress_every` accepted con
 [zipvoice-scripts] completed=500/50000 bucket=short bucket_completed=500
 ```
 
+For high-throughput OpenAI-compatible providers, use controlled concurrency. For Mistral Small 2506, a conservative starting point is:
+
+```toml
+requests_per_minute = 180
+conversations_per_request = 10
+concurrency = 8
+```
+
 Export ZipVoice split-prompt TSV:
 
 ```bash

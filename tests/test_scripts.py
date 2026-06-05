@@ -114,6 +114,35 @@ def test_generate_scripts_bounds_empty_batches(tmp_path: Path, monkeypatch) -> N
         generate_scripts(config, tmp_path / "dialogues.jsonl", limit=5, dry_run=True)
 
 
+def test_generate_scripts_concurrent_writes_unique_ids(tmp_path: Path, monkeypatch) -> None:
+    config = default_config()
+    config.script_generation.concurrency = 3
+    config.script_generation.conversations_per_request = 2
+    config.script_generation.progress_every = 0
+    config.script_generation.requests_per_minute = 0
+
+    class FakeClient:
+        def complete(self, _prompt: str) -> str:
+            return (
+                "[S1] Hey, are you free tonight after work for dinner?\n"
+                "[S2] Yes, I can meet after dinner near the station.\n"
+                "[S1] Perfect, let us try the new cafe downtown.\n"
+                "[S2] Great, I will reserve a table for seven.\n"
+                "---\n"
+                "[S1] The proposal needs stronger budget details before review.\n"
+                "[S2] I can add updated cost estimates tomorrow morning.\n"
+                "[S1] Great, please also check the timeline section.\n"
+                "[S2] Sure, I will send revisions by noon."
+            )
+
+    monkeypatch.setattr(scripts_module, "_make_client", lambda _config: FakeClient())
+    output = tmp_path / "dialogues.jsonl"
+    generate_scripts(config, output, limit=6)
+    scripts = list(read_jsonl(output, DialogueScript))
+    assert len(scripts) == 6
+    assert len({script.conversation_id for script in scripts}) == 6
+
+
 def test_openai_client_retries_timeouts(monkeypatch) -> None:
     calls = {"count": 0}
 

@@ -34,6 +34,7 @@ class ScriptGenerationConfig(BaseModel):
     api_retry_backoff_sec: float = 5.0
     requests_per_minute: int = 35
     conversations_per_request: int = 5
+    concurrency: int = 1
     progress_every: int = 500
     max_retries: int = 3
     topics: list[str] = Field(default_factory=list)

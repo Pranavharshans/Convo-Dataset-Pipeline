@@ -9,6 +9,7 @@ api_retries = 5
 api_retry_backoff_sec = 5
 requests_per_minute = 35
 conversations_per_request = 5
+concurrency = 1
 progress_every = 500
 max_retries = 3
 topics = [

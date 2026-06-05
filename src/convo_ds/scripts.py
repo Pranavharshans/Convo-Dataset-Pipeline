@@ -4,8 +4,10 @@ import os
 import random
 import re
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 import httpx
 
@@ -37,15 +39,19 @@ DEFAULT_TOPICS = [
 class RateLimiter:
     requests_per_minute: int
     last_request_at: float = 0.0
+    lock: Lock | None = None
 
     def wait(self) -> None:
         if self.requests_per_minute <= 0:
             return
-        interval = 60.0 / self.requests_per_minute
-        elapsed = time.monotonic() - self.last_request_at
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-        self.last_request_at = time.monotonic()
+        if self.lock is None:
+            self.lock = Lock()
+        with self.lock:
+            interval = 60.0 / self.requests_per_minute
+            elapsed = time.monotonic() - self.last_request_at
+            if elapsed < interval:
+                time.sleep(interval - elapsed)
+            self.last_request_at = time.monotonic()
 
 
 class OpenAICompatibleClient:
@@ -217,36 +223,164 @@ def generate_scripts(config: PipelineConfig, output_path: Path, limit: int | Non
 
     for bucket in config.buckets:
         bucket_target = min(bucket.count, max(0, total_target - written))
-        empty_batches = 0
-        while written < total_target and _bucket_count(output_path, bucket.name) < bucket_target:
-            bucket_before = _bucket_count(output_path, bucket.name)
-            batch_count = min(config.script_generation.conversations_per_request, bucket_target - _bucket_count(output_path, bucket.name))
-            if batch_count <= 0:
-                break
-            scripts = _generate_batch(config, client, limiter, bucket, batch_count, generated_ids, dry_run)
-            if not scripts:
-                empty_batches += 1
-                manifest["failed"] = manifest.get("failed", 0) + 1
-                write_json(manifest_path, manifest)
-                _log_rejection(bucket.name, "empty accepted batch after retries")
-                if empty_batches >= 5:
-                    raise RuntimeError(f"Too many empty {bucket.name} batches; inspect prompt/model output")
-                continue
-            empty_batches = 0
-            append_jsonl(output_path, scripts)
-            for script in scripts:
-                generated_ids.add(script.conversation_id)
-            written += len(scripts)
-            manifest["completed"] = written
-            write_json(manifest_path, manifest)
-            bucket_after = bucket_before + len(scripts)
-            if progress_every and written >= next_progress:
-                _log_progress(written, total_target, bucket.name, bucket_after)
-                next_progress = _next_progress_mark(written, progress_every)
+        if config.script_generation.concurrency > 1 and not dry_run:
+            written, next_progress = _generate_bucket_concurrent(
+                config,
+                output_path,
+                manifest_path,
+                manifest,
+                client,
+                limiter,
+                bucket,
+                bucket_target,
+                total_target,
+                written,
+                generated_ids,
+                next_progress,
+                progress_every,
+            )
+        else:
+            written, next_progress = _generate_bucket_sequential(
+                config,
+                output_path,
+                manifest_path,
+                manifest,
+                client,
+                limiter,
+                bucket,
+                bucket_target,
+                total_target,
+                written,
+                generated_ids,
+                next_progress,
+                progress_every,
+                dry_run,
+            )
         if written >= total_target:
             break
     _log_progress(written, total_target, "done", 0)
     return manifest
+
+
+def _generate_bucket_sequential(
+    config: PipelineConfig,
+    output_path: Path,
+    manifest_path: Path,
+    manifest: dict,
+    client: OpenAICompatibleClient | None,
+    limiter: RateLimiter,
+    bucket: ConversationBucket,
+    bucket_target: int,
+    total_target: int,
+    written: int,
+    generated_ids: set[str],
+    next_progress: int,
+    progress_every: int,
+    dry_run: bool,
+) -> tuple[int, int]:
+    empty_batches = 0
+    while written < total_target and _bucket_count(output_path, bucket.name) < bucket_target:
+        bucket_before = _bucket_count(output_path, bucket.name)
+        batch_count = min(config.script_generation.conversations_per_request, bucket_target - bucket_before)
+        if batch_count <= 0:
+            break
+        start_index = _next_bucket_index(bucket.name, generated_ids)
+        scripts = _generate_batch(config, client, limiter, bucket, batch_count, start_index, dry_run)
+        if not scripts:
+            empty_batches += 1
+            manifest["failed"] = manifest.get("failed", 0) + 1
+            write_json(manifest_path, manifest)
+            _log_rejection(bucket.name, "empty accepted batch after retries")
+            if empty_batches >= 5:
+                raise RuntimeError(f"Too many empty {bucket.name} batches; inspect prompt/model output")
+            continue
+        empty_batches = 0
+        written, next_progress = _commit_scripts(
+            output_path, manifest_path, manifest, scripts, generated_ids, written, total_target, bucket.name, bucket_before, next_progress, progress_every
+        )
+    return written, next_progress
+
+
+def _generate_bucket_concurrent(
+    config: PipelineConfig,
+    output_path: Path,
+    manifest_path: Path,
+    manifest: dict,
+    client: OpenAICompatibleClient | None,
+    limiter: RateLimiter,
+    bucket: ConversationBucket,
+    bucket_target: int,
+    total_target: int,
+    written: int,
+    generated_ids: set[str],
+    next_progress: int,
+    progress_every: int,
+) -> tuple[int, int]:
+    if client is None:
+        raise RuntimeError("LLM client is not configured; set base_url/model/api key or use --dry-run")
+    bucket_completed = _bucket_count(output_path, bucket.name)
+    next_start_index = _next_bucket_index(bucket.name, generated_ids)
+    in_flight: set[Future[list[DialogueScript]]] = set()
+    empty_batches = 0
+    max_workers = max(1, config.script_generation.concurrency)
+    print(f"[zipvoice-scripts] bucket={bucket.name} concurrency={max_workers} rpm={config.script_generation.requests_per_minute}", flush=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while written < total_target and (bucket_completed < bucket_target or in_flight):
+            while bucket_completed + _reserved_count(in_flight) < bucket_target and len(in_flight) < max_workers and written + _reserved_count(in_flight) < total_target:
+                remaining = min(bucket_target - bucket_completed - _reserved_count(in_flight), total_target - written - _reserved_count(in_flight))
+                batch_count = min(config.script_generation.conversations_per_request, remaining)
+                if batch_count <= 0:
+                    break
+                future = executor.submit(_generate_batch, config, client, limiter, bucket, batch_count, next_start_index, False)
+                future.reserved_count = batch_count  # type: ignore[attr-defined]
+                in_flight.add(future)
+                next_start_index += batch_count
+            if not in_flight:
+                break
+            done, in_flight = wait(in_flight, return_when=FIRST_COMPLETED)
+            for future in done:
+                scripts = future.result()
+                if not scripts:
+                    empty_batches += 1
+                    manifest["failed"] = manifest.get("failed", 0) + 1
+                    write_json(manifest_path, manifest)
+                    _log_rejection(bucket.name, "empty accepted batch after retries")
+                    if empty_batches >= 5:
+                        raise RuntimeError(f"Too many empty {bucket.name} batches; inspect prompt/model output")
+                    continue
+                empty_batches = 0
+                bucket_before = bucket_completed
+                written, next_progress = _commit_scripts(
+                    output_path, manifest_path, manifest, scripts, generated_ids, written, total_target, bucket.name, bucket_before, next_progress, progress_every
+                )
+                bucket_completed += len(scripts)
+    return written, next_progress
+
+
+def _commit_scripts(
+    output_path: Path,
+    manifest_path: Path,
+    manifest: dict,
+    scripts: list[DialogueScript],
+    generated_ids: set[str],
+    written: int,
+    total_target: int,
+    bucket_name: str,
+    bucket_before: int,
+    next_progress: int,
+    progress_every: int,
+) -> tuple[int, int]:
+    append_jsonl(output_path, scripts)
+    for script in scripts:
+        generated_ids.add(script.conversation_id)
+    written += len(scripts)
+    manifest["completed"] = written
+    write_json(manifest_path, manifest)
+    bucket_after = bucket_before + len(scripts)
+    if progress_every and written >= next_progress:
+        _log_progress(written, total_target, bucket_name, bucket_after)
+        next_progress = _next_progress_mark(written, progress_every)
+    return written, next_progress
 
 
 def generate_zipvoice_dialog_scripts(
@@ -277,7 +411,7 @@ def _generate_batch(
     limiter: RateLimiter,
     bucket: ConversationBucket,
     batch_count: int,
-    generated_ids: set[str],
+    start_index: int,
     dry_run: bool,
 ) -> list[DialogueScript]:
     prompt, assigned_topics = build_prompt(bucket, config.script_generation.topics, batch_count)
@@ -292,7 +426,7 @@ def _generate_batch(
             limiter.wait()
             response = client.complete(prompt)
         for block_index, block in enumerate(split_response_blocks(response)):
-            conversation_id = _next_id(bucket.name, generated_ids)
+            conversation_id = f"{bucket.name}_{start_index + len(accepted):06d}"
             try:
                 topic = assigned_topics[min(block_index, len(assigned_topics) - 1)] if assigned_topics else random.choice(config.script_generation.topics or DEFAULT_TOPICS)
                 script = parse_script_block(block, conversation_id, bucket.name, topic)
@@ -302,7 +436,6 @@ def _generate_batch(
                 reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
                 continue
             accepted.append(script)
-            generated_ids.add(conversation_id)
             if len(accepted) == batch_count:
                 if reject_reasons:
                     _log_rejection(bucket.name, _format_reject_reasons(reject_reasons))
@@ -331,13 +464,17 @@ def _make_client(config: PipelineConfig) -> OpenAICompatibleClient | None:
     )
 
 
-def _next_id(category: str, existing: set[str]) -> str:
+def _next_bucket_index(category: str, existing: set[str]) -> int:
     index = len([item for item in existing if item.startswith(f"{category}_")])
     while True:
         candidate = f"{category}_{index:06d}"
         if candidate not in existing:
-            return candidate
+            return index
         index += 1
+
+
+def _reserved_count(futures: set[Future[list[DialogueScript]]]) -> int:
+    return sum(getattr(future, "reserved_count", 0) for future in futures)
 
 
 def _bucket_count(output_path: Path, bucket_name: str) -> int:
