@@ -14,6 +14,7 @@ from convo_ds.jsonl import append_jsonl, read_json, read_jsonl, write_json
 from convo_ds.schemas import DialogueScript, ScriptTurn, Speaker
 
 SCRIPT_LINE_RE = re.compile(r"^\[(S0|S1|S2)\]\s*(.+)$")
+PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
 
 
 DEFAULT_TOPICS = [
@@ -81,7 +82,7 @@ def parse_script_block(text: str, conversation_id: str, category: str, topic: st
         speaker = Speaker.s0 if raw_speaker in {"S0", "S1"} else Speaker.s1
         if raw_speaker == "S2":
             speaker = Speaker.s1
-        turns.append(ScriptTurn(speaker=speaker, text=turn_text))
+        turns.append(ScriptTurn(speaker=speaker, text=sanitize_turn_text(turn_text)))
     return DialogueScript(
         conversation_id=conversation_id,
         category=category,
@@ -99,6 +100,9 @@ def validate_script_for_bucket(script: DialogueScript, bucket: ConversationBucke
     word_count = count_script_words(script)
     if not bucket.words_min <= word_count <= bucket.words_max:
         raise ValueError(f"{script.conversation_id} has {word_count} words, expected {bucket.words_min}-{bucket.words_max}")
+    for turn in script.turns:
+        if PARENTHETICAL_RE.search(turn.text):
+            raise ValueError(f"{script.conversation_id} contains parenthetical stage directions")
     if script.estimated_duration_sec is not None:
         lower = bucket.duration_min_sec * 0.25
         upper = bucket.duration_max_sec * 1.5
@@ -116,23 +120,34 @@ def count_script_words(script: DialogueScript) -> int:
     return sum(len(re.findall(r"\b[\w']+\b", turn.text)) for turn in script.turns)
 
 
-def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> str:
+def sanitize_turn_text(text: str) -> str:
+    cleaned = PARENTHETICAL_RE.sub("", text)
+    cleaned = re.sub(r"^[\s:：\-–—]+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> tuple[str, list[str]]:
     topic_list = topics or DEFAULT_TOPICS
     sampled_topics = random.sample(topic_list, k=min(len(topic_list), max(1, count)))
+    numbered_topics = "\n".join(f"{index + 1}. {topic}" for index, topic in enumerate(sampled_topics))
     return (
-        "Write natural two-person English dialogue scripts for synthetic speech generation.\n"
+        "Write natural two-person English dialogue scripts for ZipVoice-Dialog-Stereo TTS.\n"
         "Use exactly [S1] and [S2] speaker tags, alternating speakers every turn.\n"
-        "Include occasional non-verbal tags such as (laughs), (sighs), (gasps), (whispers), or (coughs), but keep them natural.\n"
+        "Format every turn exactly as '[S1] text' or '[S2] text'. Do not write '[S1]:' with a colon.\n"
+        "Do not include parenthetical stage directions, action tags, markdown, numbering, titles, or explanations.\n"
+        "Use plain speakable dialogue only; every word should be safe to send directly to TTS.\n"
         f"Create {count} separate conversations for category '{bucket.name}'.\n"
         f"Each conversation must have {bucket.turn_min}-{bucket.turn_max} turns.\n"
         f"Each conversation must contain {bucket.words_min}-{bucket.words_max} spoken words total.\n"
         f"Target about {bucket.duration_avg_sec:.0f} seconds after TTS; do not make every category similar length.\n"
         "Short should feel quick. Medium should have more development. Long should sustain a topic. Extended should have a story arc or deeper explanation.\n"
         f"Category purpose: {bucket.description}\n"
-        f"Use varied topics like: {', '.join(sampled_topics)}.\n"
+        "Use these topics in order, one topic per conversation, and keep the conversation actually about its assigned topic:\n"
+        f"{numbered_topics}\n"
         "Separate conversations with a line containing only ---.\n"
         "Do not add titles, numbering, markdown fences, or explanations."
-    )
+    ), sampled_topics
 
 
 def split_response_blocks(text: str) -> list[str]:
@@ -199,7 +214,7 @@ def _generate_batch(
     generated_ids: set[str],
     dry_run: bool,
 ) -> list[DialogueScript]:
-    prompt = build_prompt(bucket, config.script_generation.topics, batch_count)
+    prompt, assigned_topics = build_prompt(bucket, config.script_generation.topics, batch_count)
     for attempt in range(config.script_generation.max_retries + 1):
         if dry_run:
             response = _dry_run_response(bucket, batch_count)
@@ -209,10 +224,11 @@ def _generate_batch(
             limiter.wait()
             response = client.complete(prompt)
         scripts: list[DialogueScript] = []
-        for block in split_response_blocks(response):
+        for block_index, block in enumerate(split_response_blocks(response)):
             conversation_id = _next_id(bucket.name, generated_ids)
             try:
-                script = parse_script_block(block, conversation_id, bucket.name, random.choice(config.script_generation.topics or DEFAULT_TOPICS))
+                topic = assigned_topics[min(block_index, len(assigned_topics) - 1)] if assigned_topics else random.choice(config.script_generation.topics or DEFAULT_TOPICS)
+                script = parse_script_block(block, conversation_id, bucket.name, topic)
                 validate_script_for_bucket(script, bucket)
             except ValueError:
                 continue

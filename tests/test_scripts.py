@@ -3,7 +3,7 @@ from pathlib import Path
 from convo_ds.config import default_config
 from convo_ds.jsonl import read_jsonl
 from convo_ds.schemas import DialogueScript, Speaker
-from convo_ds.scripts import generate_scripts, generate_zipvoice_dialog_scripts, parse_script_block, validate_script_for_bucket
+from convo_ds.scripts import generate_scripts, generate_zipvoice_dialog_scripts, parse_script_block, sanitize_turn_text, validate_script_for_bucket
 
 
 def test_parse_script_block_accepts_dia_tags() -> None:
@@ -17,6 +17,24 @@ def test_parse_script_block_accepts_dia_tags() -> None:
         "plans",
     )
     assert [turn.speaker for turn in script.turns] == [Speaker.s0, Speaker.s1, Speaker.s0, Speaker.s1]
+
+
+def test_parse_script_block_sanitizes_zipvoice_text() -> None:
+    script = parse_script_block(
+        "[S1]: Hey, are you free tonight? (smiles)\n"
+        "[S2]: Yeah, I am free after dinner.\n"
+        "[S1]: Great, let's meet near the station.\n"
+        "[S2]: Perfect, send me the address.",
+        "short_000000",
+        "short",
+        "plans",
+    )
+    assert script.turns[0].text == "Hey, are you free tonight?"
+    assert script.turns[1].text == "Yeah, I am free after dinner."
+
+
+def test_sanitize_turn_text_removes_actions_and_leading_punctuation() -> None:
+    assert sanitize_turn_text(": Perfect! I'll book the cabin. (checks list)") == "Perfect! I'll book the cabin."
 
 
 def test_validate_script_for_bucket() -> None:
