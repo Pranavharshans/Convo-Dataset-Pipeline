@@ -60,6 +60,9 @@ class OpenAICompatibleClient:
         base_url: str,
         api_key: str,
         model: str,
+        temperature: float = 0.9,
+        top_p: float = 1.0,
+        max_tokens: int | None = 4096,
         timeout: float = 240.0,
         retries: int = 5,
         retry_backoff_sec: float = 5.0,
@@ -67,22 +70,29 @@ class OpenAICompatibleClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
         self.timeout = timeout
         self.retries = retries
         self.retry_backoff_sec = retry_backoff_sec
 
     def complete(self, prompt: str) -> str:
         last_error: Exception | None = None
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+        }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         for attempt in range(self.retries + 1):
             try:
                 response = httpx.post(
                     f"{self.base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.9,
-                    },
+                    json=payload,
                     timeout=self.timeout,
                 )
                 if response.status_code == 429 or response.status_code >= 500:
@@ -177,7 +187,10 @@ def normalize_terminal_punctuation(text: str) -> str:
 
 def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> tuple[str, list[str]]:
     topic_list = topics or DEFAULT_TOPICS
-    sampled_topics = random.sample(topic_list, k=min(len(topic_list), max(1, count)))
+    if len(topic_list) >= count:
+        sampled_topics = random.sample(topic_list, k=max(1, count))
+    else:
+        sampled_topics = [random.choice(topic_list) for _ in range(max(1, count))]
     numbered_topics = "\n".join(f"{index + 1}. {topic}" for index, topic in enumerate(sampled_topics))
     return (
         "Write natural two-person English dialogue scripts for ZipVoice-Dialog-Stereo TTS.\n"
@@ -458,6 +471,9 @@ def _make_client(config: PipelineConfig) -> OpenAICompatibleClient | None:
         settings.base_url,
         api_key,
         settings.model,
+        temperature=settings.temperature,
+        top_p=settings.top_p,
+        max_tokens=settings.max_tokens,
         timeout=settings.api_timeout_sec,
         retries=settings.api_retries,
         retry_backoff_sec=settings.api_retry_backoff_sec,

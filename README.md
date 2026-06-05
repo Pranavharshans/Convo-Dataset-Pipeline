@@ -4,7 +4,8 @@ Synthetic dataset pipeline for full-duplex speech LLM training.
 
 The v1 pipeline focuses on:
 
-- Stage 3: clean two-speaker English dialogue generated from scripts and synthesized with Dia 1.6B.
+- ZipVoice-Dialog script generation with 50K bucketed conversations.
+- Stage 3: clean two-speaker English dialogue generated from scripts and synthesized with ZipVoice or Dia adapters.
 - Stage 4: overlapped dialogue derived from Stage 3 with heuristic backchannels, interruptions, and simultaneous starts.
 - Mimi token exports using the first 8 codebooks for training shards.
 - Hugging Face dataset upload by subset.
@@ -32,10 +33,19 @@ Main commands:
 Script generation uses an OpenAI-compatible API:
 
 ```bash
-export LLM_API_KEY=...
-export LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-export LLM_MODEL=...
+export MISTRAL_API_KEY=...
+# or
+export NVIDIA_API_KEY=...
 ```
+
+Use provider-specific local configs instead of editing checked-in examples:
+
+```bash
+cp examples/mistral.config.toml local.mistral.toml
+cp examples/nim.config.toml local.nim.toml
+```
+
+Full text generation runbook: [docs/generation.md](docs/generation.md).
 
 Hugging Face upload uses:
 
@@ -52,7 +62,7 @@ The primary script path is ZipVoice-Dialog-Stereo. Generate bucketed scripts:
 
 ```bash
 convo-ds generate-zipvoice-dialog-scripts \
-  --config examples/config.toml \
+  --config local.mistral.toml \
   --output-dir data/scripts/zipvoice_dialog \
   --limit 50000
 ```
@@ -89,6 +99,8 @@ requests_per_minute = 180
 conversations_per_request = 10
 concurrency = 8
 ```
+
+For NVIDIA NIM, start with `examples/nim.config.toml` and tune upward only after the provider is stable.
 
 Export ZipVoice split-prompt TSV:
 

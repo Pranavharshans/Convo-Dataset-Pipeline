@@ -1,0 +1,30 @@
+output_dir = "data"
+
+[script_generation]
+base_url = "https://api.mistral.ai/v1"
+api_key_env = "MISTRAL_API_KEY"
+model = "mistral-small-2506"
+temperature = 0.9
+top_p = 1.0
+max_tokens = 4096
+api_timeout_sec = 120
+api_retries = 5
+api_retry_backoff_sec = 3
+requests_per_minute = 180
+conversations_per_request = 10
+concurrency = 8
+progress_every = 500
+max_retries = 3
+topics = [
+  "making evening plans",
+  "fixing a work proposal",
+  "switching careers",
+  "a strange conference story",
+  "planning a weekend trip",
+  "resolving a small misunderstanding",
+  "discussing a product launch",
+  "remembering a school incident",
+  "helping a friend make a decision",
+  "debating where to eat",
+]
+

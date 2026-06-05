@@ -9,6 +9,7 @@ from convo_ds.schemas import DialogueScript, Speaker
 import convo_ds.scripts as scripts_module
 from convo_ds.scripts import (
     OpenAICompatibleClient,
+    build_prompt,
     generate_scripts,
     generate_zipvoice_dialog_scripts,
     normalize_terminal_punctuation,
@@ -141,6 +142,13 @@ def test_generate_scripts_concurrent_writes_unique_ids(tmp_path: Path, monkeypat
     scripts = list(read_jsonl(output, DialogueScript))
     assert len(scripts) == 6
     assert len({script.conversation_id for script in scripts}) == 6
+
+
+def test_build_prompt_assigns_topic_per_requested_conversation() -> None:
+    bucket = default_config().buckets[0]
+    _prompt, topics = build_prompt(bucket, ["topic one", "topic two"], 5)
+
+    assert len(topics) == 5
 
 
 def test_openai_client_retries_timeouts(monkeypatch) -> None:

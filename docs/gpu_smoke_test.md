@@ -1,21 +1,39 @@
 # GPU Smoke Test
 
-Run this on a CUDA machine after installing Dia and the optional GPU dependencies.
+Run this on a CUDA machine after installing ZipVoice/Dia and the optional GPU dependencies.
 
 ```bash
 uv sync --extra dev --extra gpu
 ```
 
-Generate or reuse scripts:
+Generate or reuse ZipVoice scripts. For provider setup, see [generation.md](generation.md).
 
 ```bash
-convo-ds generate-scripts \
-  --config examples/config.toml \
-  --output data/scripts/dialogues.jsonl \
+convo-ds generate-zipvoice-dialog-scripts \
+  --config local.mistral.toml \
+  --output-dir data/scripts/zipvoice_dialog \
   --limit 10
 ```
 
-Synthesize Stage 3 with Dia 1.6B:
+Export ZipVoice TSV after creating a `voice_prompts/` prompt bank:
+
+```bash
+convo-ds export-zipvoice-dialog-tsv \
+  --scripts data/scripts/zipvoice_dialog/zipvoice_dialog_scripts.jsonl \
+  --voice-prompts voice_prompts \
+  --output data/zipvoice_dialog/test.tsv
+```
+
+Synthesize with ZipVoice-Dialog-Stereo:
+
+```bash
+python3 -m zipvoice.bin.infer_zipvoice_dialog \
+  --model-name zipvoice_dialog_stereo \
+  --test-list data/zipvoice_dialog/test.tsv \
+  --res-dir data/zipvoice_dialog/results
+```
+
+The legacy mock/Dia Stage 3 path is still useful for local end-to-end smoke checks:
 
 ```bash
 convo-ds synth-stage3 \
