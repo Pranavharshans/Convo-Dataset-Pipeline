@@ -47,6 +47,8 @@ cp examples/nim.config.toml local.nim.toml
 
 Full text generation runbook: [docs/generation.md](docs/generation.md).
 
+Real-time Qwen + Mimi training plan: [docs/realtime_training_plan.md](docs/realtime_training_plan.md).
+
 Hugging Face upload uses:
 
 ```bash
