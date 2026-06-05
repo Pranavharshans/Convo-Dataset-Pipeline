@@ -76,6 +76,12 @@ The generator enforces separate bucket constraints:
 - long: 8-10 turns, 115-170 words, sustained topic.
 - extended: 10-14 turns, 170-260 words, story arc or deeper explanation.
 
+During generation the terminal logs progress every `progress_every` accepted conversations. The default is 500:
+
+```text
+[zipvoice-scripts] completed=500/50000 bucket=short bucket_completed=500
+```
+
 Export ZipVoice split-prompt TSV:
 
 ```bash

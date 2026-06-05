@@ -6,6 +6,7 @@ api_key_env = "LLM_API_KEY"
 model = "replace-with-nim-model"
 requests_per_minute = 35
 conversations_per_request = 5
+progress_every = 500
 max_retries = 3
 topics = [
   "making evening plans",

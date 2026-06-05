@@ -15,6 +15,7 @@ from convo_ds.schemas import DialogueScript, ScriptTurn, Speaker
 
 SCRIPT_LINE_RE = re.compile(r"^\[(S0|S1|S2)\]\s*(.+)$")
 PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
+BRACKETED_ACTION_RE = re.compile(r"\[(?!S[012]\])[^]]+\]")
 
 
 DEFAULT_TOPICS = [
@@ -101,8 +102,8 @@ def validate_script_for_bucket(script: DialogueScript, bucket: ConversationBucke
     if not bucket.words_min <= word_count <= bucket.words_max:
         raise ValueError(f"{script.conversation_id} has {word_count} words, expected {bucket.words_min}-{bucket.words_max}")
     for turn in script.turns:
-        if PARENTHETICAL_RE.search(turn.text):
-            raise ValueError(f"{script.conversation_id} contains parenthetical stage directions")
+        if PARENTHETICAL_RE.search(turn.text) or BRACKETED_ACTION_RE.search(turn.text):
+            raise ValueError(f"{script.conversation_id} contains stage directions")
     if script.estimated_duration_sec is not None:
         lower = bucket.duration_min_sec * 0.25
         upper = bucket.duration_max_sec * 1.5
@@ -122,6 +123,7 @@ def count_script_words(script: DialogueScript) -> int:
 
 def sanitize_turn_text(text: str) -> str:
     cleaned = PARENTHETICAL_RE.sub("", text)
+    cleaned = BRACKETED_ACTION_RE.sub("", cleaned)
     cleaned = re.sub(r"^[\s:：\-–—]+", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
@@ -135,7 +137,8 @@ def build_prompt(bucket: ConversationBucket, topics: list[str], count: int) -> t
         "Write natural two-person English dialogue scripts for ZipVoice-Dialog-Stereo TTS.\n"
         "Use exactly [S1] and [S2] speaker tags, alternating speakers every turn.\n"
         "Format every turn exactly as '[S1] text' or '[S2] text'. Do not write '[S1]:' with a colon.\n"
-        "Do not include parenthetical stage directions, action tags, markdown, numbering, titles, or explanations.\n"
+        "Do not include emotion tags, nonverbal tags, parenthetical stage directions, action tags, markdown, numbering, titles, or explanations.\n"
+        "Forbidden examples: (laughs), (sighs), (gasps), (smiles), (checks phone), [laugh], [sigh], [whisper].\n"
         "Use plain speakable dialogue only; every word should be safe to send directly to TTS.\n"
         f"Create {count} separate conversations for category '{bucket.name}'.\n"
         f"Each conversation must have {bucket.turn_min}-{bucket.turn_max} turns.\n"
@@ -163,11 +166,17 @@ def generate_scripts(config: PipelineConfig, output_path: Path, limit: int | Non
     client = _make_client(config)
     limiter = RateLimiter(config.script_generation.requests_per_minute)
     total_target = limit if limit is not None else sum(bucket.count for bucket in config.buckets)
-    written = 0
+    existing_total = min(len(generated_ids), total_target)
+    written = existing_total
+    progress_every = max(0, config.script_generation.progress_every)
+    next_progress = _next_progress_mark(existing_total, progress_every)
+    if existing_total:
+        _log_progress(existing_total, total_target, "resume", 0)
 
     for bucket in config.buckets:
         bucket_target = min(bucket.count, max(0, total_target - written))
         while written < total_target and _bucket_count(output_path, bucket.name) < bucket_target:
+            bucket_before = _bucket_count(output_path, bucket.name)
             batch_count = min(config.script_generation.conversations_per_request, bucket_target - _bucket_count(output_path, bucket.name))
             if batch_count <= 0:
                 break
@@ -176,10 +185,15 @@ def generate_scripts(config: PipelineConfig, output_path: Path, limit: int | Non
             for script in scripts:
                 generated_ids.add(script.conversation_id)
             written += len(scripts)
-            manifest["completed"] = manifest.get("completed", 0) + len(scripts)
+            manifest["completed"] = written
             write_json(manifest_path, manifest)
+            bucket_after = bucket_before + len(scripts)
+            if progress_every and written >= next_progress:
+                _log_progress(written, total_target, bucket.name, bucket_after)
+                next_progress = _next_progress_mark(written, progress_every)
         if written >= total_target:
             break
+    _log_progress(written, total_target, "done", 0)
     return manifest
 
 
@@ -260,6 +274,19 @@ def _next_id(category: str, existing: set[str]) -> str:
 
 def _bucket_count(output_path: Path, bucket_name: str) -> int:
     return sum(1 for script in read_jsonl(output_path, DialogueScript) if script.category == bucket_name)
+
+
+def _next_progress_mark(current: int, progress_every: int) -> int:
+    if progress_every <= 0:
+        return 0
+    return ((current // progress_every) + 1) * progress_every
+
+
+def _log_progress(completed: int, total: int, bucket_name: str, bucket_completed: int) -> None:
+    if bucket_completed:
+        print(f"[zipvoice-scripts] completed={completed}/{total} bucket={bucket_name} bucket_completed={bucket_completed}", flush=True)
+    else:
+        print(f"[zipvoice-scripts] completed={completed}/{total} status={bucket_name}", flush=True)
 
 
 def _dry_run_response(bucket: ConversationBucket, count: int) -> str:

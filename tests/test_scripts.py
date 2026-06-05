@@ -21,8 +21,8 @@ def test_parse_script_block_accepts_dia_tags() -> None:
 
 def test_parse_script_block_sanitizes_zipvoice_text() -> None:
     script = parse_script_block(
-        "[S1]: Hey, are you free tonight? (smiles)\n"
-        "[S2]: Yeah, I am free after dinner.\n"
+        "[S1]: Hey, are you free tonight? (smiles) [laugh]\n"
+        "[S2]: Yeah, I am free after dinner. [sigh]\n"
         "[S1]: Great, let's meet near the station.\n"
         "[S2]: Perfect, send me the address.",
         "short_000000",
@@ -34,7 +34,7 @@ def test_parse_script_block_sanitizes_zipvoice_text() -> None:
 
 
 def test_sanitize_turn_text_removes_actions_and_leading_punctuation() -> None:
-    assert sanitize_turn_text(": Perfect! I'll book the cabin. (checks list)") == "Perfect! I'll book the cabin."
+    assert sanitize_turn_text(": Perfect! I'll book the cabin. (checks list) [laugh]") == "Perfect! I'll book the cabin."
 
 
 def test_validate_script_for_bucket() -> None:
@@ -58,6 +58,15 @@ def test_generate_scripts_dry_run(tmp_path: Path) -> None:
     assert manifest["completed"] == 5
     assert len(scripts) == 5
     assert scripts[0].conversation_id == "short_000000"
+
+
+def test_generate_scripts_logs_progress(tmp_path: Path, capsys) -> None:
+    config = default_config()
+    config.script_generation.progress_every = 5
+    output = tmp_path / "dialogues.jsonl"
+    generate_scripts(config, output, limit=5, dry_run=True)
+    captured = capsys.readouterr()
+    assert "[zipvoice-scripts] completed=5/5" in captured.out
 
 
 def test_generate_zipvoice_dialog_scripts_writes_bucket_files(tmp_path: Path) -> None:

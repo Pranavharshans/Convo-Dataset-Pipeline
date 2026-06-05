@@ -31,6 +31,7 @@ class ScriptGenerationConfig(BaseModel):
     model: str | None = None
     requests_per_minute: int = 35
     conversations_per_request: int = 5
+    progress_every: int = 500
     max_retries: int = 3
     topics: list[str] = Field(default_factory=list)
 
