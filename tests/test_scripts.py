@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from convo_ds.config import default_config
 from convo_ds.jsonl import read_jsonl
 from convo_ds.schemas import DialogueScript, Speaker
+import convo_ds.scripts as scripts_module
 from convo_ds.scripts import (
     generate_scripts,
     generate_zipvoice_dialog_scripts,
@@ -85,6 +88,18 @@ def test_generate_scripts_logs_progress(tmp_path: Path, capsys) -> None:
     generate_scripts(config, output, limit=5, dry_run=True)
     captured = capsys.readouterr()
     assert "[zipvoice-scripts] completed=5/5" in captured.out
+
+
+def test_generate_scripts_bounds_empty_batches(tmp_path: Path, monkeypatch) -> None:
+    config = default_config()
+    config.script_generation.progress_every = 0
+
+    def always_empty(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(scripts_module, "_generate_batch", always_empty)
+    with pytest.raises(RuntimeError, match="Too many empty short batches"):
+        generate_scripts(config, tmp_path / "dialogues.jsonl", limit=5, dry_run=True)
 
 
 def test_generate_zipvoice_dialog_scripts_writes_bucket_files(tmp_path: Path) -> None:

@@ -192,12 +192,22 @@ def generate_scripts(config: PipelineConfig, output_path: Path, limit: int | Non
 
     for bucket in config.buckets:
         bucket_target = min(bucket.count, max(0, total_target - written))
+        empty_batches = 0
         while written < total_target and _bucket_count(output_path, bucket.name) < bucket_target:
             bucket_before = _bucket_count(output_path, bucket.name)
             batch_count = min(config.script_generation.conversations_per_request, bucket_target - _bucket_count(output_path, bucket.name))
             if batch_count <= 0:
                 break
             scripts = _generate_batch(config, client, limiter, bucket, batch_count, generated_ids, dry_run)
+            if not scripts:
+                empty_batches += 1
+                manifest["failed"] = manifest.get("failed", 0) + 1
+                write_json(manifest_path, manifest)
+                _log_rejection(bucket.name, "empty accepted batch after retries")
+                if empty_batches >= 5:
+                    raise RuntimeError(f"Too many empty {bucket.name} batches; inspect prompt/model output")
+                continue
+            empty_batches = 0
             append_jsonl(output_path, scripts)
             for script in scripts:
                 generated_ids.add(script.conversation_id)
@@ -246,30 +256,39 @@ def _generate_batch(
     dry_run: bool,
 ) -> list[DialogueScript]:
     prompt, assigned_topics = build_prompt(bucket, config.script_generation.topics, batch_count)
+    accepted: list[DialogueScript] = []
+    reject_reasons: dict[str, int] = {}
     for attempt in range(config.script_generation.max_retries + 1):
         if dry_run:
-            response = _dry_run_response(bucket, batch_count)
+            response = _dry_run_response(bucket, batch_count - len(accepted))
         else:
             if client is None:
                 raise RuntimeError("LLM client is not configured; set base_url/model/api key or use --dry-run")
             limiter.wait()
             response = client.complete(prompt)
-        scripts: list[DialogueScript] = []
         for block_index, block in enumerate(split_response_blocks(response)):
             conversation_id = _next_id(bucket.name, generated_ids)
             try:
                 topic = assigned_topics[min(block_index, len(assigned_topics) - 1)] if assigned_topics else random.choice(config.script_generation.topics or DEFAULT_TOPICS)
                 script = parse_script_block(block, conversation_id, bucket.name, topic)
                 validate_script_for_bucket(script, bucket)
-            except ValueError:
+            except ValueError as exc:
+                reason = _short_rejection_reason(str(exc))
+                reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
                 continue
-            scripts.append(script)
+            accepted.append(script)
             generated_ids.add(conversation_id)
-            if len(scripts) == batch_count:
-                return scripts
+            if len(accepted) == batch_count:
+                if reject_reasons:
+                    _log_rejection(bucket.name, _format_reject_reasons(reject_reasons))
+                return accepted
         if attempt >= config.script_generation.max_retries:
-            raise RuntimeError(f"Could not generate valid {bucket.name} batch after retries")
-    return []
+            if accepted:
+                _log_rejection(bucket.name, f"accepted partial batch {len(accepted)}/{batch_count}; rejected {_format_reject_reasons(reject_reasons)}")
+                return accepted
+            _log_rejection(bucket.name, f"no valid conversations after retries; rejected {_format_reject_reasons(reject_reasons)}")
+            return []
+    return accepted
 
 
 def _make_client(config: PipelineConfig) -> OpenAICompatibleClient | None:
@@ -304,6 +323,23 @@ def _log_progress(completed: int, total: int, bucket_name: str, bucket_completed
         print(f"[zipvoice-scripts] completed={completed}/{total} bucket={bucket_name} bucket_completed={bucket_completed}", flush=True)
     else:
         print(f"[zipvoice-scripts] completed={completed}/{total} status={bucket_name}", flush=True)
+
+
+def _log_rejection(bucket_name: str, reason: str) -> None:
+    print(f"[zipvoice-scripts] bucket={bucket_name} rejected={reason}", flush=True)
+
+
+def _short_rejection_reason(reason: str) -> str:
+    reason = re.sub(r"^[^:]+:\s*", "", reason)
+    if len(reason) > 140:
+        return f"{reason[:137]}..."
+    return reason
+
+
+def _format_reject_reasons(reasons: dict[str, int]) -> str:
+    if not reasons:
+        return "none"
+    return ", ".join(f"{reason} x{count}" for reason, count in sorted(reasons.items()))
 
 
 def _dry_run_response(bucket: ConversationBucket, count: int) -> str:
