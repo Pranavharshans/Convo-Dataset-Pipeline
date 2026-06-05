@@ -1,12 +1,14 @@
 from pathlib import Path
 
 import pytest
+import httpx
 
 from convo_ds.config import default_config
 from convo_ds.jsonl import read_jsonl
 from convo_ds.schemas import DialogueScript, Speaker
 import convo_ds.scripts as scripts_module
 from convo_ds.scripts import (
+    OpenAICompatibleClient,
     generate_scripts,
     generate_zipvoice_dialog_scripts,
     normalize_terminal_punctuation,
@@ -14,6 +16,16 @@ from convo_ds.scripts import (
     sanitize_turn_text,
     validate_script_for_bucket,
 )
+
+
+class _FakeResponse:
+    status_code = 200
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return {"choices": [{"message": {"content": "[S1] Hello there.\n[S2] Hi back."}}]}
 
 
 def test_parse_script_block_accepts_dia_tags() -> None:
@@ -100,6 +112,23 @@ def test_generate_scripts_bounds_empty_batches(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(scripts_module, "_generate_batch", always_empty)
     with pytest.raises(RuntimeError, match="Too many empty short batches"):
         generate_scripts(config, tmp_path / "dialogues.jsonl", limit=5, dry_run=True)
+
+
+def test_openai_client_retries_timeouts(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise httpx.ReadTimeout("slow response")
+        return _FakeResponse()
+
+    monkeypatch.setattr(scripts_module.httpx, "post", fake_post)
+    monkeypatch.setattr(scripts_module.time, "sleep", lambda _seconds: None)
+    client = OpenAICompatibleClient("https://example.com/v1", "key", "model", retries=1, retry_backoff_sec=0)
+
+    assert client.complete("prompt") == "[S1] Hello there.\n[S2] Hi back."
+    assert calls["count"] == 2
 
 
 def test_generate_zipvoice_dialog_scripts_writes_bucket_files(tmp_path: Path) -> None:

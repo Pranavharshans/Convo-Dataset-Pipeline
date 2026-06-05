@@ -29,6 +29,9 @@ class ScriptGenerationConfig(BaseModel):
     base_url: str | None = None
     api_key_env: str = "LLM_API_KEY"
     model: str | None = None
+    api_timeout_sec: float = 240.0
+    api_retries: int = 5
+    api_retry_backoff_sec: float = 5.0
     requests_per_minute: int = 35
     conversations_per_request: int = 5
     progress_every: int = 500

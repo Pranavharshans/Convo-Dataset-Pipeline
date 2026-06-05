@@ -49,26 +49,51 @@ class RateLimiter:
 
 
 class OpenAICompatibleClient:
-    def __init__(self, base_url: str, api_key: str, model: str, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout: float = 240.0,
+        retries: int = 5,
+        retry_backoff_sec: float = 5.0,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.retries = retries
+        self.retry_backoff_sec = retry_backoff_sec
 
     def complete(self, prompt: str) -> str:
-        response = httpx.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.9,
-            },
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return payload["choices"][0]["message"]["content"]
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                response = httpx.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.9,
+                    },
+                    timeout=self.timeout,
+                )
+                if response.status_code == 429 or response.status_code >= 500:
+                    response.raise_for_status()
+                response.raise_for_status()
+                payload = response.json()
+                return payload["choices"][0]["message"]["content"]
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.HTTPStatusError) as exc:
+                last_error = exc
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 429:
+                    raise
+                if attempt >= self.retries:
+                    break
+                wait_sec = self.retry_backoff_sec * (attempt + 1)
+                print(f"[zipvoice-scripts] api_retry={attempt + 1}/{self.retries} wait_sec={wait_sec:.1f} error={type(exc).__name__}", flush=True)
+                time.sleep(wait_sec)
+        raise RuntimeError(f"LLM API failed after retries: {last_error}") from last_error
 
 
 def parse_script_block(text: str, conversation_id: str, category: str, topic: str) -> DialogueScript:
@@ -296,7 +321,14 @@ def _make_client(config: PipelineConfig) -> OpenAICompatibleClient | None:
     api_key = os.environ.get(settings.api_key_env)
     if not settings.base_url or not settings.model or not api_key:
         return None
-    return OpenAICompatibleClient(settings.base_url, api_key, settings.model)
+    return OpenAICompatibleClient(
+        settings.base_url,
+        api_key,
+        settings.model,
+        timeout=settings.api_timeout_sec,
+        retries=settings.api_retries,
+        retry_backoff_sec=settings.api_retry_backoff_sec,
+    )
 
 
 def _next_id(category: str, existing: set[str]) -> str:
