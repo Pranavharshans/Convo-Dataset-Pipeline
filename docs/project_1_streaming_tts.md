@@ -146,6 +146,12 @@ Required:
 5. Track source audio path, text, speaker_id, duration, n_frames, and codebook count.
 ```
 
+Notebook:
+
+```text
+Mimi_32_Codebook_Dataset_Builder.ipynb
+```
+
 Extraction validation:
 
 ```text
