@@ -24,6 +24,21 @@ microphone PCM
 
 No external ASR is required at inference. Transcripts are used during training because they help the model connect speech tokens to language.
 
+## Project Specs
+
+The roadmap is split into three standalone project specs:
+
+```text
+Project 1: Streaming Mini-Miso TTS
+  docs/project_1_streaming_tts.md
+
+Project 2: Half-Duplex Speech Dialogue
+  docs/project_2_half_duplex.md
+
+Project 3: Full-Duplex Speech Dialogue
+  docs/project_3_full_duplex.md
+```
+
 ## Architecture Reference: MisoTTS
 
 MisoTTS is a useful validated reference for this plan because it uses the same basic direction:
